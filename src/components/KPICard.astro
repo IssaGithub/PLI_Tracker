@@ -1,0 +1,212 @@
+---
+export interface Props {
+  id: string;
+  name: string;
+  value: number;
+  target?: number;
+  unit: string;
+  category: string;
+  color: string;
+  description?: string;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onAddEntry?: () => void;
+}
+
+const { 
+  id,
+  name, 
+  value, 
+  target, 
+  unit, 
+  category, 
+  color, 
+  description,
+  onEdit,
+  onDelete,
+  onAddEntry
+} = Astro.props;
+
+const progressPercentage = target ? Math.min((value / target) * 100, 100) : 0;
+const isOverTarget = target && value > target;
+const isNearTarget = target && value >= target * 0.8;
+
+const formatValue = (val: number) => {
+  if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+  if (val >= 1000) return `${(val / 1000).toFixed(1)}K`;
+  return val.toString();
+};
+---
+
+<div class="kpi-card p-6 relative group">
+  <!-- Category Badge -->
+  <div class="flex items-center justify-between mb-3">
+    <span 
+      class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+      style={`background-color: ${color}20; color: ${color};`}
+    >
+      {category}
+    </span>
+    
+    <!-- Actions Menu -->
+    <div class="opacity-0 group-hover:opacity-100 transition-opacity">
+      <div class="relative">
+        <button 
+          type="button" 
+          class="p-1 rounded-full hover:bg-gray-100 transition-colors"
+          data-kpi-menu-button={id}
+        >
+          <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path>
+          </svg>
+        </button>
+        
+        <!-- Dropdown Menu -->
+        <div 
+          class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-10"
+          data-kpi-menu={id}
+        >
+          <div class="py-1">
+            <button 
+              type="button" 
+              class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              data-action="add-entry"
+              data-kpi-id={id}
+            >
+              📈 Add Entry
+            </button>
+            <button 
+              type="button" 
+              class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              data-action="edit"
+              data-kpi-id={id}
+            >
+              ✏️ Edit KPI
+            </button>
+            <button 
+              type="button" 
+              class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              data-action="export"
+              data-kpi-id={id}
+            >
+              📊 Export History
+            </button>
+            <button 
+              type="button" 
+              class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+              data-action="delete"
+              data-kpi-id={id}
+            >
+              🗑️ Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI Value -->
+  <div class="mb-4">
+    <h3 class="text-lg font-semibold text-gray-900 mb-1">{name}</h3>
+    {description && (
+      <p class="text-sm text-gray-600 mb-3">{description}</p>
+    )}
+    
+    <div class="flex items-baseline space-x-2">
+      <span class="kpi-value" style={`color: ${color};`}>
+        {formatValue(value)}
+      </span>
+      <span class="text-sm text-gray-500">{unit}</span>
+      {target && (
+        <span class="text-sm text-gray-400">
+          / {formatValue(target)} target
+        </span>
+      )}
+    </div>
+  </div>
+
+  <!-- Progress Bar (if target is set) -->
+  {target && (
+    <div class="mb-4">
+      <div class="flex justify-between text-xs text-gray-500 mb-1">
+        <span>Progress</span>
+        <span>{Math.round(progressPercentage)}%</span>
+      </div>
+      <div class="progress-bar">
+        <div 
+          class={`progress-fill ${
+            isOverTarget 
+              ? 'bg-green-500' 
+              : isNearTarget 
+                ? 'bg-yellow-500' 
+                : 'bg-blue-500'
+          }`}
+          style={`width: ${Math.min(progressPercentage, 100)}%; background-color: ${color};`}
+        ></div>
+      </div>
+      {isOverTarget && (
+        <p class="text-xs text-green-600 mt-1">🎉 Target exceeded!</p>
+      )}
+    </div>
+  )}
+
+  <!-- Quick Actions -->
+  <div class="flex space-x-2">
+    <button 
+      type="button"
+      class="flex-1 btn-primary text-xs"
+      data-action="quick-update"
+      data-kpi-id={id}
+    >
+      Quick Update
+    </button>
+    <button 
+      type="button"
+      class="px-3 py-2 text-xs btn-secondary"
+      data-action="view-history"
+      data-kpi-id={id}
+    >
+      📈
+    </button>
+  </div>
+</div>
+
+<script>
+  // Handle menu toggles
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    
+    // Close all menus first
+    document.querySelectorAll('[data-kpi-menu]').forEach(menu => {
+      menu.classList.add('hidden');
+    });
+    
+    // If clicked on menu button, toggle that menu
+    if (target.closest('[data-kpi-menu-button]')) {
+      const button = target.closest('[data-kpi-menu-button]') as HTMLElement;
+      const kpiId = button.getAttribute('data-kpi-menu-button');
+      const menu = document.querySelector(`[data-kpi-menu="${kpiId}"]`);
+      if (menu) {
+        menu.classList.toggle('hidden');
+      }
+      e.stopPropagation();
+    }
+  });
+
+  // Handle menu actions
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    
+    if (target.hasAttribute('data-action')) {
+      const action = target.getAttribute('data-action');
+      const kpiId = target.getAttribute('data-kpi-id');
+      
+      if (action && kpiId) {
+        // Dispatch custom event for parent components to handle
+        window.dispatchEvent(new CustomEvent('kpi-action', {
+          detail: { action, kpiId }
+        }));
+      }
+    }
+  });
+</script> 

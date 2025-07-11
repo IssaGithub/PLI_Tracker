@@ -1,0 +1,298 @@
+---
+import KPICard from './KPICard.astro';
+import type { KPI } from '../types/kpi';
+
+export interface Props {
+  kpis: KPI[];
+}
+
+const { kpis } = Astro.props;
+
+// Group KPIs by category
+const kpisByCategory = kpis.reduce((acc, kpi) => {
+  if (!acc[kpi.category]) acc[kpi.category] = [];
+  acc[kpi.category].push(kpi);
+  return acc;
+}, {} as Record<string, KPI[]>);
+
+const hasKPIs = kpis.length > 0;
+---
+
+<div class="space-y-8">
+  <!-- Header Section -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">KPI Dashboard</h1>
+      <p class="text-gray-600 mt-1">
+        {hasKPIs 
+          ? `Tracking ${kpis.length} KPI${kpis.length !== 1 ? 's' : ''} across ${Object.keys(kpisByCategory).length} categories`
+          : 'Start tracking your business metrics'
+        }
+      </p>
+    </div>
+    
+    <div class="flex space-x-3">
+      <button 
+        type="button"
+        class="btn-secondary"
+        id="export-all-btn"
+        disabled={!hasKPIs}
+      >
+        📊 Export CSV
+      </button>
+      <button 
+        type="button"
+        class="btn-primary"
+        id="add-kpi-btn"
+      >
+        ➕ Add KPI
+      </button>
+    </div>
+  </div>
+
+  <!-- Quick Stats -->
+  {hasKPIs && (
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white p-4 rounded-lg border border-gray-200">
+        <div class="text-sm font-medium text-gray-600">Total KPIs</div>
+        <div class="text-2xl font-bold text-gray-900">{kpis.length}</div>
+      </div>
+      <div class="bg-white p-4 rounded-lg border border-gray-200">
+        <div class="text-sm font-medium text-gray-600">Categories</div>
+        <div class="text-2xl font-bold text-gray-900">{Object.keys(kpisByCategory).length}</div>
+      </div>
+      <div class="bg-white p-4 rounded-lg border border-gray-200">
+        <div class="text-sm font-medium text-gray-600">With Targets</div>
+        <div class="text-2xl font-bold text-gray-900">{kpis.filter(k => k.target).length}</div>
+      </div>
+      <div class="bg-white p-4 rounded-lg border border-gray-200">
+        <div class="text-sm font-medium text-gray-600">Target Met</div>
+        <div class="text-2xl font-bold text-green-600">
+          {kpis.filter(k => k.target && k.value >= k.target).length}
+        </div>
+      </div>
+    </div>
+  )}
+
+  <!-- KPI Cards -->
+  {hasKPIs ? (
+    <div class="space-y-8">
+      {Object.entries(kpisByCategory).map(([category, categoryKpis]) => (
+        <div key={category}>
+          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <span class="mr-2">{category}</span>
+            <span class="text-sm font-normal text-gray-500">({categoryKpis.length})</span>
+          </h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {categoryKpis.map(kpi => (
+              <KPICard
+                key={kpi.id}
+                id={kpi.id}
+                name={kpi.name}
+                value={kpi.value}
+                target={kpi.target}
+                unit={kpi.unit}
+                category={kpi.category}
+                color={kpi.color}
+                description={kpi.description}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <!-- Empty State -->
+    <div class="text-center py-12">
+      <div class="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+        <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+        </svg>
+      </div>
+      <h3 class="text-lg font-medium text-gray-900 mb-2">No KPIs yet</h3>
+      <p class="text-gray-600 mb-6 max-w-md mx-auto">
+        Start tracking your business performance by creating your first KPI. 
+        You can track metrics like revenue, customer satisfaction, or any custom metric.
+      </p>
+      <button 
+        type="button"
+        class="btn-primary"
+        id="add-first-kpi-btn"
+      >
+        🚀 Create Your First KPI
+      </button>
+    </div>
+  )}
+</div>
+
+<!-- Quick Update Modal -->
+<div id="quick-update-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+  <div class="bg-white rounded-lg shadow-xl max-w-sm w-full">
+    <div class="p-6">
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Quick Update</h3>
+      <form id="quick-update-form" class="space-y-4">
+        <div>
+          <label for="quick-value" class="form-label">New Value</label>
+          <input 
+            type="number" 
+            id="quick-value" 
+            name="value" 
+            class="form-input" 
+            step="0.01"
+            required
+          />
+        </div>
+        <div>
+          <label for="quick-note" class="form-label">Note (optional)</label>
+          <input 
+            type="text" 
+            id="quick-note" 
+            name="note" 
+            class="form-input" 
+            placeholder="What changed?"
+          />
+        </div>
+        <div class="flex space-x-3">
+          <button type="submit" class="flex-1 btn-primary">Update</button>
+          <button type="button" class="btn-secondary" id="cancel-quick-update">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { addKPIEntry, deleteKPI, exportData } from '../utils/storage';
+  import { exportAllDataToCSV, exportKPIHistoryToCSV } from '../utils/csv';
+
+  let currentKpiId: string | null = null;
+
+  // Add KPI button handlers
+  document.getElementById('add-kpi-btn')?.addEventListener('click', showKPIForm);
+  document.getElementById('add-first-kpi-btn')?.addEventListener('click', showKPIForm);
+
+  function showKPIForm(kpiData?: any) {
+    // Create and show KPI form modal
+    fetch('/api/kpi-form')
+      .then(response => response.text())
+      .then(html => {
+        const modalContainer = document.createElement('div');
+        modalContainer.innerHTML = html;
+        document.body.appendChild(modalContainer.firstElementChild!);
+        
+        if (kpiData) {
+          // Populate form with existing data for editing
+          const form = document.getElementById('kpi-form') as HTMLFormElement;
+          form.setAttribute('data-kpi-id', kpiData.id);
+          // Populate form fields...
+        }
+      })
+      .catch(error => {
+        console.error('Error loading KPI form:', error);
+        alert('Error loading form. Please refresh and try again.');
+      });
+  }
+
+  // Export all data
+  document.getElementById('export-all-btn')?.addEventListener('click', () => {
+    try {
+      const data = exportData();
+      exportAllDataToCSV(data);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Error exporting data. Please try again.');
+    }
+  });
+
+  // Handle KPI actions from cards
+  window.addEventListener('kpi-action', (e: any) => {
+    const { action, kpiId } = e.detail;
+    
+    switch (action) {
+      case 'quick-update':
+        showQuickUpdate(kpiId);
+        break;
+      case 'edit':
+        editKPI(kpiId);
+        break;
+      case 'delete':
+        deleteKPIConfirm(kpiId);
+        break;
+      case 'export':
+        exportKPIHistory(kpiId);
+        break;
+      case 'add-entry':
+        showQuickUpdate(kpiId);
+        break;
+    }
+  });
+
+  function showQuickUpdate(kpiId: string) {
+    currentKpiId = kpiId;
+    const modal = document.getElementById('quick-update-modal');
+    modal?.classList.remove('hidden');
+  }
+
+  function editKPI(kpiId: string) {
+    // Load KPI data and show edit form
+    const kpis = JSON.parse(localStorage.getItem('kpi-tracker-kpis') || '[]');
+    const kpi = kpis.find((k: any) => k.id === kpiId);
+    if (kpi) {
+      showKPIForm(kpi);
+    }
+  }
+
+  function deleteKPIConfirm(kpiId: string) {
+    const kpis = JSON.parse(localStorage.getItem('kpi-tracker-kpis') || '[]');
+    const kpi = kpis.find((k: any) => k.id === kpiId);
+    
+    if (kpi && confirm(`Are you sure you want to delete "${kpi.name}"? This action cannot be undone.`)) {
+      deleteKPI(kpiId);
+      window.location.reload();
+    }
+  }
+
+  function exportKPIHistory(kpiId: string) {
+    const kpis = JSON.parse(localStorage.getItem('kpi-tracker-kpis') || '[]');
+    const entries = JSON.parse(localStorage.getItem('kpi-tracker-entries') || '[]');
+    const kpi = kpis.find((k: any) => k.id === kpiId);
+    
+    if (kpi) {
+      exportKPIHistoryToCSV(kpiId, kpi.name, entries);
+    }
+  }
+
+  // Quick update form
+  document.getElementById('quick-update-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    
+    if (!currentKpiId) return;
+    
+    const formData = new FormData(e.target as HTMLFormElement);
+    const value = parseFloat(formData.get('value') as string);
+    const note = formData.get('note') as string;
+    
+    try {
+      addKPIEntry({
+        kpiId: currentKpiId,
+        value,
+        note: note || undefined,
+        date: new Date()
+      });
+      
+      // Close modal and refresh
+      document.getElementById('quick-update-modal')?.classList.add('hidden');
+      window.location.reload();
+      
+    } catch (error) {
+      console.error('Error updating KPI:', error);
+      alert('Error updating KPI. Please try again.');
+    }
+  });
+
+  // Cancel quick update
+  document.getElementById('cancel-quick-update')?.addEventListener('click', () => {
+    document.getElementById('quick-update-modal')?.classList.add('hidden');
+    currentKpiId = null;
+  });
+</script> 

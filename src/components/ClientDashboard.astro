@@ -1,0 +1,757 @@
+---
+// This component will be hydrated on the client side
+---
+
+<div id="client-dashboard">
+  <!-- Loading state -->
+  <div id="loading-state" class="text-center py-12">
+    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+    <p class="text-gray-600">Loading your KPIs...</p>
+  </div>
+  
+  <!-- Dashboard content will be inserted here -->
+  <div id="dashboard-content" class="hidden"></div>
+</div>
+
+<script>
+  import { getKPIs, getKPIEntries } from '../utils/storage';
+  import { exportData, deleteKPI, addKPIEntry, updateKPI } from '../utils/storage';
+  import { exportAllDataToCSV, exportKPIHistoryToCSV } from '../utils/csv';
+
+  let currentKpiId: string | null = null;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadDashboard();
+  });
+
+  function loadDashboard() {
+    const kpis = getKPIs();
+    const loadingState = document.getElementById('loading-state');
+    const dashboardContent = document.getElementById('dashboard-content');
+    
+    if (loadingState) loadingState.classList.add('hidden');
+    if (dashboardContent) {
+      dashboardContent.classList.remove('hidden');
+      renderDashboard(kpis);
+    }
+  }
+
+  function renderDashboard(kpis: any[]) {
+    const dashboardContent = document.getElementById('dashboard-content');
+    if (!dashboardContent) return;
+
+    // Group KPIs by category
+    const kpisByCategory = kpis.reduce((acc, kpi) => {
+      if (!acc[kpi.category]) acc[kpi.category] = [];
+      acc[kpi.category].push(kpi);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    const hasKPIs = kpis.length > 0;
+
+    dashboardContent.innerHTML = `
+      <div class="space-y-8">
+        <!-- Header Section -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900">KPI Dashboard</h1>
+            <p class="text-gray-600 mt-1">
+              ${hasKPIs 
+                ? `Tracking ${kpis.length} KPI${kpis.length !== 1 ? 's' : ''} across ${Object.keys(kpisByCategory).length} categories`
+                : 'Start tracking your business metrics'
+              }
+            </p>
+          </div>
+          
+          <div class="flex space-x-3">
+            <button 
+              type="button"
+              class="btn-secondary ${!hasKPIs ? 'opacity-50 cursor-not-allowed' : ''}"
+              id="export-all-btn"
+              ${!hasKPIs ? 'disabled' : ''}
+            >
+              📊 Export CSV
+            </button>
+            <button 
+              type="button"
+              class="btn-primary"
+              id="add-kpi-btn"
+            >
+              ➕ Add KPI
+            </button>
+          </div>
+        </div>
+
+        ${hasKPIs ? renderQuickStats(kpis, kpisByCategory) : ''}
+        ${hasKPIs ? renderKPICards(kpisByCategory) : renderEmptyState()}
+      </div>
+      
+      ${renderQuickUpdateModal()}
+    `;
+
+    // Attach event listeners
+    attachEventListeners();
+  }
+
+  function renderQuickStats(kpis: any[], kpisByCategory: Record<string, any[]>) {
+    const withTargets = kpis.filter(k => k.target).length;
+    const targetsMet = kpis.filter(k => k.target && k.value >= k.target).length;
+    
+    return `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white p-4 rounded-lg border border-gray-200">
+          <div class="text-sm font-medium text-gray-600">Total KPIs</div>
+          <div class="text-2xl font-bold text-gray-900">${kpis.length}</div>
+        </div>
+        <div class="bg-white p-4 rounded-lg border border-gray-200">
+          <div class="text-sm font-medium text-gray-600">Categories</div>
+          <div class="text-2xl font-bold text-gray-900">${Object.keys(kpisByCategory).length}</div>
+        </div>
+        <div class="bg-white p-4 rounded-lg border border-gray-200">
+          <div class="text-sm font-medium text-gray-600">With Targets</div>
+          <div class="text-2xl font-bold text-gray-900">${withTargets}</div>
+        </div>
+        <div class="bg-white p-4 rounded-lg border border-gray-200">
+          <div class="text-sm font-medium text-gray-600">Targets Met</div>
+          <div class="text-2xl font-bold text-green-600">${targetsMet}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderKPICards(kpisByCategory: Record<string, any[]>) {
+    return `
+      <div class="space-y-8">
+        ${Object.entries(kpisByCategory).map(([category, categoryKpis]) => `
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <span class="mr-2">${category}</span>
+              <span class="text-sm font-normal text-gray-500">(${categoryKpis.length})</span>
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              ${categoryKpis.map(kpi => renderKPICard(kpi)).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderKPICard(kpi: any) {
+    const progressPercentage = kpi.target ? Math.min((kpi.value / kpi.target) * 100, 100) : 0;
+    const isOverTarget = kpi.target && kpi.value > kpi.target;
+    const isNearTarget = kpi.target && kpi.value >= kpi.target * 0.8;
+
+    const formatValue = (val: number) => {
+      if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+      if (val >= 1000) return `${(val / 1000).toFixed(1)}K`;
+      return val.toString();
+    };
+
+    return `
+      <div class="kpi-card p-6 relative group">
+        <!-- Category Badge -->
+        <div class="flex items-center justify-between mb-3">
+          <span 
+            class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+            style="background-color: ${kpi.color}20; color: ${kpi.color};"
+          >
+            ${kpi.category}
+          </span>
+          
+          <!-- Actions Menu -->
+          <div class="opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="relative">
+              <button 
+                type="button" 
+                class="p-1 rounded-full hover:bg-gray-100 transition-colors"
+                data-kpi-menu-button="${kpi.id}"
+              >
+                <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path>
+                </svg>
+              </button>
+              
+              <!-- Dropdown Menu -->
+              <div 
+                class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-10"
+                data-kpi-menu="${kpi.id}"
+              >
+                <div class="py-1">
+                  <button 
+                    type="button" 
+                    class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    data-action="add-entry"
+                    data-kpi-id="${kpi.id}"
+                  >
+                    📈 Add Entry
+                  </button>
+                  <button 
+                    type="button" 
+                    class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    data-action="edit"
+                    data-kpi-id="${kpi.id}"
+                  >
+                    ✏️ Edit KPI
+                  </button>
+                  <button 
+                    type="button" 
+                    class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    data-action="export"
+                    data-kpi-id="${kpi.id}"
+                  >
+                    📊 Export History
+                  </button>
+                  <button 
+                    type="button" 
+                    class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                    data-action="delete"
+                    data-kpi-id="${kpi.id}"
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI Value -->
+        <div class="mb-4">
+          <h3 class="text-lg font-semibold text-gray-900 mb-1">${kpi.name}</h3>
+          ${kpi.description ? `<p class="text-sm text-gray-600 mb-3">${kpi.description}</p>` : ''}
+          
+          <div class="flex items-baseline space-x-2">
+            <span class="kpi-value" style="color: ${kpi.color};">
+              ${formatValue(kpi.value)}
+            </span>
+            <span class="text-sm text-gray-500">${kpi.unit}</span>
+            ${kpi.target ? `
+              <span class="text-sm text-gray-400">
+                / ${formatValue(kpi.target)} target
+              </span>
+            ` : ''}
+          </div>
+        </div>
+
+        ${kpi.target ? `
+          <!-- Progress Bar -->
+          <div class="mb-4">
+            <div class="flex justify-between text-xs text-gray-500 mb-1">
+              <span>Progress</span>
+              <span>${Math.round(progressPercentage)}%</span>
+            </div>
+            <div class="progress-bar">
+              <div 
+                class="progress-fill ${
+                  isOverTarget 
+                    ? 'bg-green-500' 
+                    : isNearTarget 
+                      ? 'bg-yellow-500' 
+                      : 'bg-blue-500'
+                }"
+                style="width: ${Math.min(progressPercentage, 100)}%; background-color: ${kpi.color};"
+              ></div>
+            </div>
+            ${isOverTarget ? '<p class="text-xs text-green-600 mt-1">🎉 Target exceeded!</p>' : ''}
+          </div>
+        ` : ''}
+
+        <!-- Quick Actions -->
+        <div class="flex space-x-2">
+          <button 
+            type="button"
+            class="flex-1 btn-primary text-xs"
+            data-action="quick-update"
+            data-kpi-id="${kpi.id}"
+          >
+            Quick Update
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderEmptyState() {
+    return `
+      <div class="text-center py-12">
+        <div class="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+          <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+          </svg>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">No KPIs yet</h3>
+        <p class="text-gray-600 mb-6 max-w-md mx-auto">
+          Start tracking your business performance by creating your first KPI. 
+          You can track metrics like revenue, customer satisfaction, or any custom metric.
+        </p>
+        <button 
+          type="button"
+          class="btn-primary"
+          id="add-first-kpi-btn"
+        >
+          🚀 Create Your First KPI
+        </button>
+      </div>
+    `;
+  }
+
+  function renderQuickUpdateModal() {
+    return `
+      <!-- Quick Update Modal -->
+      <div id="quick-update-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg shadow-xl max-w-sm w-full">
+          <div class="p-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Quick Update</h3>
+            <form id="quick-update-form" class="space-y-4">
+              <div>
+                <label for="quick-value" class="form-label">New Value</label>
+                <input 
+                  type="number" 
+                  id="quick-value" 
+                  name="value" 
+                  class="form-input" 
+                  step="0.01"
+                  required
+                />
+              </div>
+              <div>
+                <label for="quick-note" class="form-label">Note (optional)</label>
+                <input 
+                  type="text" 
+                  id="quick-note" 
+                  name="note" 
+                  class="form-input" 
+                  placeholder="What changed?"
+                />
+              </div>
+              <div class="flex space-x-3">
+                <button type="submit" class="flex-1 btn-primary">Update</button>
+                <button type="button" class="btn-secondary" id="cancel-quick-update">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachEventListeners() {
+    // Add KPI buttons
+    const addKpiBtn = document.getElementById('add-kpi-btn');
+    const addFirstKpiBtn = document.getElementById('add-first-kpi-btn');
+    
+    if (addKpiBtn) addKpiBtn.addEventListener('click', () => showKPIForm());
+    if (addFirstKpiBtn) addFirstKpiBtn.addEventListener('click', () => showKPIForm());
+
+    // Export button
+    const exportBtn = document.getElementById('export-all-btn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        try {
+          const data = exportData();
+          exportAllDataToCSV(data);
+        } catch (error) {
+          console.error('Export error:', error);
+          alert('Error exporting data. Please try again.');
+        }
+      });
+    }
+
+    // Menu toggles
+    document.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      
+      // Close all menus first
+      document.querySelectorAll('[data-kpi-menu]').forEach(menu => {
+        menu.classList.add('hidden');
+      });
+      
+      // If clicked on menu button, toggle that menu
+      if (target.closest('[data-kpi-menu-button]')) {
+        const button = target.closest('[data-kpi-menu-button]') as HTMLElement;
+        const kpiId = button.getAttribute('data-kpi-menu-button');
+        const menu = document.querySelector(`[data-kpi-menu="${kpiId}"]`);
+        if (menu) {
+          menu.classList.toggle('hidden');
+        }
+        e.stopPropagation();
+      }
+    });
+
+    // Menu actions
+    document.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      
+      if (target.hasAttribute('data-action')) {
+        const action = target.getAttribute('data-action');
+        const kpiId = target.getAttribute('data-kpi-id');
+        
+        if (action && kpiId) {
+          handleKPIAction(action, kpiId);
+        }
+      }
+    });
+
+    // Quick update form
+    const quickUpdateForm = document.getElementById('quick-update-form');
+    if (quickUpdateForm) {
+      quickUpdateForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        
+        if (!currentKpiId) return;
+        
+        const formData = new FormData(e.target as HTMLFormElement);
+        const value = parseFloat(formData.get('value') as string);
+        const note = formData.get('note') as string;
+        
+        try {
+          addKPIEntry({
+            kpiId: currentKpiId,
+            value,
+            note: note || undefined,
+            date: new Date()
+          });
+          
+          // Close modal and refresh
+          const modal = document.getElementById('quick-update-modal');
+          if (modal) modal.classList.add('hidden');
+          loadDashboard();
+          
+        } catch (error) {
+          console.error('Error updating KPI:', error);
+          alert('Error updating KPI. Please try again.');
+        }
+      });
+    }
+
+    // Cancel quick update
+    const cancelBtn = document.getElementById('cancel-quick-update');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        const modal = document.getElementById('quick-update-modal');
+        if (modal) modal.classList.add('hidden');
+        currentKpiId = null;
+      });
+    }
+  }
+
+  function handleKPIAction(action: string, kpiId: string) {
+    switch (action) {
+      case 'quick-update':
+      case 'add-entry':
+        showQuickUpdate(kpiId);
+        break;
+      case 'edit':
+        editKPI(kpiId);
+        break;
+      case 'delete':
+        deleteKPIConfirm(kpiId);
+        break;
+      case 'export':
+        exportKPIHistory(kpiId);
+        break;
+    }
+  }
+
+  function showQuickUpdate(kpiId: string) {
+    currentKpiId = kpiId;
+    const modal = document.getElementById('quick-update-modal');
+    if (modal) modal.classList.remove('hidden');
+  }
+
+  function editKPI(kpiId: string) {
+    const kpis = getKPIs();
+    const kpi = kpis.find(k => k.id === kpiId);
+    if (kpi) {
+      showKPIForm(kpi);
+    }
+  }
+
+  function deleteKPIConfirm(kpiId: string) {
+    const kpis = getKPIs();
+    const kpi = kpis.find(k => k.id === kpiId);
+    
+    if (kpi && confirm(`Are you sure you want to delete "${kpi.name}"? This action cannot be undone.`)) {
+      deleteKPI(kpiId);
+      loadDashboard();
+    }
+  }
+
+  function exportKPIHistory(kpiId: string) {
+    const kpis = getKPIs();
+    const entries = getKPIEntries();
+    const kpi = kpis.find(k => k.id === kpiId);
+    
+    if (kpi) {
+      exportKPIHistoryToCSV(kpiId, kpi.name, entries);
+    }
+  }
+
+  function showKPIForm(kpiData?: any) {
+    // Create and show KPI form modal
+    const formHTML = generateKPIFormHTML(kpiData);
+    const modalContainer = document.createElement('div');
+    modalContainer.innerHTML = formHTML;
+    document.body.appendChild(modalContainer.firstElementChild!);
+    
+    // Initialize form
+    initializeKPIForm(kpiData);
+  }
+
+  function generateKPIFormHTML(kpi?: any) {
+    const isEdit = !!kpi;
+    const formTitle = isEdit ? 'Edit KPI' : 'Add New KPI';
+    
+    const categories = ['Financial', 'Marketing', 'Sales', 'Operations', 'Customer', 'HR', 'Product', 'Custom'];
+    const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
+
+    return `
+      <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" id="kpi-form-modal">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+          <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+              <h2 class="text-xl font-semibold text-gray-900">${formTitle}</h2>
+              <button 
+                type="button" 
+                class="text-gray-400 hover:text-gray-600 transition-colors"
+                id="close-form"
+              >
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+
+            <form id="kpi-form" class="space-y-4" ${kpi ? `data-kpi-id="${kpi.id}"` : ''}>
+              <!-- KPI Name -->
+              <div>
+                <label for="name" class="form-label">KPI Name *</label>
+                <input 
+                  type="text" 
+                  id="name" 
+                  name="name" 
+                  class="form-input" 
+                  placeholder="e.g., Monthly Revenue"
+                  value="${kpi?.name || ''}"
+                  required
+                />
+              </div>
+
+              <!-- Description -->
+              <div>
+                <label for="description" class="form-label">Description</label>
+                <textarea 
+                  id="description" 
+                  name="description" 
+                  rows="3"
+                  class="form-input" 
+                  placeholder="Optional description of this KPI"
+                >${kpi?.description || ''}</textarea>
+              </div>
+
+              <!-- Current Value -->
+              <div>
+                <label for="value" class="form-label">Current Value *</label>
+                <input 
+                  type="number" 
+                  id="value" 
+                  name="value" 
+                  class="form-input" 
+                  placeholder="0"
+                  step="0.01"
+                  value="${kpi?.value || ''}"
+                  required
+                />
+              </div>
+
+              <!-- Target Value -->
+              <div>
+                <label for="target" class="form-label">Target Value</label>
+                <input 
+                  type="number" 
+                  id="target" 
+                  name="target" 
+                  class="form-input" 
+                  placeholder="Optional target to track progress"
+                  step="0.01"
+                  value="${kpi?.target || ''}"
+                />
+              </div>
+
+              <!-- Unit -->
+              <div>
+                <label for="unit" class="form-label">Unit *</label>
+                <input 
+                  type="text" 
+                  id="unit" 
+                  name="unit" 
+                  class="form-input" 
+                  placeholder="e.g., $, %, users, sales"
+                  value="${kpi?.unit || ''}"
+                  required
+                />
+              </div>
+
+              <!-- Category -->
+              <div>
+                <label for="category" class="form-label">Category *</label>
+                <select id="category" name="category" class="form-input" required>
+                  <option value="">Select a category</option>
+                  ${categories.map(cat => `
+                    <option value="${cat}" ${kpi?.category === cat ? 'selected' : ''}>${cat}</option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <!-- Color -->
+              <div>
+                <label for="color" class="form-label">Color *</label>
+                <div class="grid grid-cols-4 gap-2 mt-2">
+                  ${colors.map(color => `
+                    <button
+                      type="button"
+                      class="w-full h-10 rounded-md border-2 transition-all ${
+                        (kpi?.color === color) ? 'border-gray-900 scale-95' : 'border-gray-200 hover:border-gray-300'
+                      }"
+                      style="background-color: ${color};"
+                      data-color="${color}"
+                      data-color-selector
+                    >
+                      <span class="sr-only">Select ${color}</span>
+                    </button>
+                  `).join('')}
+                </div>
+                <input 
+                  type="hidden" 
+                  id="color" 
+                  name="color" 
+                  value="${kpi?.color || colors[0]}"
+                  required
+                />
+              </div>
+
+              <!-- Form Actions -->
+              <div class="flex space-x-3 pt-4">
+                <button 
+                  type="submit" 
+                  class="flex-1 btn-primary"
+                  id="submit-btn"
+                >
+                  ${isEdit ? 'Update KPI' : 'Create KPI'}
+                </button>
+                <button 
+                  type="button" 
+                  class="btn-secondary"
+                  id="cancel-btn"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function initializeKPIForm(kpiData?: any) {
+    const modal = document.getElementById('kpi-form-modal');
+    const form = document.getElementById('kpi-form') as HTMLFormElement;
+    const colorInput = document.getElementById('color') as HTMLInputElement;
+    const submitBtn = document.getElementById('submit-btn');
+    
+    // Color selection
+    document.querySelectorAll('[data-color-selector]').forEach(button => {
+      button.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        const color = target.getAttribute('data-color');
+        
+        if (color) {
+          // Update UI
+          document.querySelectorAll('[data-color-selector]').forEach(btn => {
+            btn.classList.remove('border-gray-900', 'scale-95');
+            btn.classList.add('border-gray-200');
+          });
+          
+          target.classList.remove('border-gray-200');
+          target.classList.add('border-gray-900', 'scale-95');
+          
+          // Update hidden input
+          colorInput.value = color;
+        }
+      });
+    });
+
+    // Form submission
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const formData = new FormData(form);
+      const kpiFormData = {
+        name: formData.get('name') as string,
+        description: formData.get('description') as string || undefined,
+        value: parseFloat(formData.get('value') as string),
+        target: formData.get('target') ? parseFloat(formData.get('target') as string) : undefined,
+        unit: formData.get('unit') as string,
+        category: formData.get('category') as string,
+        color: formData.get('color') as string,
+      };
+
+      try {
+        if (submitBtn) {
+          submitBtn.textContent = 'Saving...';
+          submitBtn.setAttribute('disabled', 'true');
+        }
+
+        // Check if this is an edit or create
+        const kpiId = form.getAttribute('data-kpi-id');
+        
+        if (kpiId) {
+          // Edit existing KPI
+          updateKPI(kpiId, kpiFormData);
+        } else {
+          // Create new KPI
+          const { addKPI } = await import('../utils/storage');
+          addKPI(kpiFormData);
+        }
+
+        // Close modal and refresh
+        modal?.remove();
+        loadDashboard();
+        
+      } catch (error) {
+        console.error('Error saving KPI:', error);
+        alert('Error saving KPI. Please try again.');
+      } finally {
+        if (submitBtn) {
+          submitBtn.textContent = form.getAttribute('data-kpi-id') ? 'Update KPI' : 'Create KPI';
+          submitBtn.removeAttribute('disabled');
+        }
+      }
+    });
+
+    // Close modal handlers
+    document.getElementById('close-form')?.addEventListener('click', () => {
+      modal?.remove();
+    });
+
+    document.getElementById('cancel-btn')?.addEventListener('click', () => {
+      modal?.remove();
+    });
+
+    // Close on backdrop click
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        modal?.remove();
+      }
+    });
+  }
+</script> 
