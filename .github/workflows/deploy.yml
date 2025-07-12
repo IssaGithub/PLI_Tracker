@@ -56,7 +56,7 @@ jobs:
         uses: actions/configure-pages@v4
         
       - name: Install dependencies
-        run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
+        run: ${{ steps.detect-package-manager.outputs.manager }} install
         
       - name: Build with Astro
         run: |

@@ -21,16 +21,10 @@ try {
   execSync('git status', { stdio: 'ignore' });
   console.log('✅ Git repository found\n');
 
-  // Check if gh-pages is installed
-  console.log('📦 Checking gh-pages dependency...');
-  try {
-    require.resolve('gh-pages');
-    console.log('✅ gh-pages found\n');
-  } catch (error) {
-    console.log('📦 Installing gh-pages...');
-    execSync('npm install --save-dev gh-pages', { stdio: 'inherit' });
-    console.log('✅ gh-pages installed\n');
-  }
+  // Install gh-pages for deployment
+  console.log('📦 Installing gh-pages for deployment...');
+  execSync('npm install gh-pages', { stdio: 'inherit' });
+  console.log('✅ gh-pages installed\n');
 
   // Clean previous build
   console.log('🧹 Cleaning previous build...');
